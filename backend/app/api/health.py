@@ -47,7 +47,7 @@ def health():
     return jsonify(
         status='ok',
         service='uecp-api',
-        version='1.0.2',
+        version='1.0.3',
         database={
             'configured': bool(db_raw),
             'scheme': parsed.scheme if parsed else 'none',
