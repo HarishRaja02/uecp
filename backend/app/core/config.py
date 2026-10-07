@@ -19,7 +19,9 @@ def resolve_database_url():
     if not raw:
         return f"sqlite:///{(PROJECT_ROOT / 'uecp.db').resolve()}"
     if raw.startswith('postgres://'):
-        raw = raw.replace('postgres://', 'postgresql://', 1)
+        raw = 'postgresql+psycopg://' + raw[len('postgres://'):]
+    elif raw.startswith('postgresql://'):
+        raw = 'postgresql+psycopg://' + raw[len('postgresql://'):]
     if raw.startswith('sqlite:///./'):
         rel = raw[len('sqlite:///./'):]
         return f"sqlite:///{(PROJECT_ROOT / rel).resolve()}"

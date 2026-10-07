@@ -89,7 +89,7 @@ def create_app(test_config=None):
         return jsonify(error='rate_limited', message='Too many requests'), 429
 
     with app.app_context():
-        if app.config.get('TESTING') and settings.auto_create_tables:
+        if app.config.get('TESTING') or settings.auto_create_tables:
             db.create_all()
     return app
 
