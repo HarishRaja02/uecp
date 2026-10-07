@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
-    "app": {
+    "api": {
       "root": ".",
       "framework": "flask"
     },
@@ -14,7 +14,7 @@
     {
       "source": "/api/(.*)",
       "destination": {
-        "service": "app"
+        "service": "api"
       }
     },
     {
