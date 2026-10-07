@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from flask import Blueprint, jsonify, request, make_response
+from flask import Blueprint, jsonify, request, make_response, current_app
 from app import limiter
 from app.db import db
 from app.models import User, Membership, Organization, Session as UserSession
@@ -18,36 +18,41 @@ def _issue(user, membership):
     return access,refresh,sess
 
 @auth_bp.post('/login')
-@limiter.limit('5 per minute')
+@limiter.limit('20 per minute')
 def login():
-    data=request.get_json(silent=True) or {}
-    email=str(data.get('email','')).strip().lower()
-    password=str(data.get('password',''))
-    user=User.query.filter_by(email=email).first()
-    if not user or user.status != 'ACTIVE' or not verify_password(password,user.password_hash):
-        if user:
-            audit(actor_id=user.id,action='LOGIN_FAILED',resource='session',result='DENIED',reason='invalid_credentials')
-            security_event('HIGH','LOGIN_FAILED',user.id,details={'reason':'invalid_credentials'})
-            db.session.commit()
-        return jsonify(error='invalid_credentials',message='Invalid credentials'),401
-    memberships=Membership.query.filter_by(user_id=user.id).all()
-    if not memberships: return jsonify(error='no_membership',message='No active organization membership'),403
-    requested_org_id=data.get('organization_id')
-    if requested_org_id:
-        membership=next((m for m in memberships if m.organization_id == requested_org_id),None)
-        if not membership: return jsonify(error='organization_not_found',message='You are not a member of that organization'),403
-    elif len(memberships) > 1:
-        return jsonify(error='organization_selection_required',message='Select an organization before signing in',organizations=[{'id':m.organization_id,'role':m.role} for m in memberships]),409
-    else:
-        membership=memberships[0]
-    org=Organization.query.get(membership.organization_id)
-    if not org or org.status != 'ACTIVE': return jsonify(error='organization_inactive',message='Organization is not active'),403
-    access,refresh,sess=_issue(user,membership)
-    audit(actor_id=user.id,organization_id=org.id,action='LOGIN_SUCCESS',resource='session',resource_id=sess.id)
-    db.session.commit()
-    resp=make_response(jsonify(access_token=access,expires_in=settings.access_token_minutes*60,user={'id':user.id,'email':user.email,'role':membership.role,'organization_id':org.id,'is_platform_admin':user.is_platform_admin}))
-    resp.set_cookie('uecp_refresh',refresh,httponly=True,secure=settings.secure_cookies or settings.environment=='production',samesite='Strict',max_age=settings.refresh_token_days*86400,path='/api/v1/auth')
-    return resp
+    try:
+        data=request.get_json(silent=True) or {}
+        email=str(data.get('email','')).strip().lower()
+        password=str(data.get('password',''))
+        user=User.query.filter_by(email=email).first()
+        if not user or user.status != 'ACTIVE' or not verify_password(password,user.password_hash):
+            if user:
+                audit(actor_id=user.id,action='LOGIN_FAILED',resource='session',result='DENIED',reason='invalid_credentials')
+                security_event('HIGH','LOGIN_FAILED',user.id,details={'reason':'invalid_credentials'})
+                db.session.commit()
+            return jsonify(error='invalid_credentials',message='Invalid credentials'),401
+        memberships=Membership.query.filter_by(user_id=user.id).all()
+        if not memberships: return jsonify(error='no_membership',message='No active organization membership'),403
+        requested_org_id=data.get('organization_id')
+        if requested_org_id:
+            membership=next((m for m in memberships if m.organization_id == requested_org_id),None)
+            if not membership: return jsonify(error='organization_not_found',message='You are not a member of that organization'),403
+        elif len(memberships) > 1:
+            return jsonify(error='organization_selection_required',message='Select an organization before signing in',organizations=[{'id':m.organization_id,'role':m.role} for m in memberships]),409
+        else:
+            membership=memberships[0]
+        org=Organization.query.get(membership.organization_id)
+        if not org or org.status != 'ACTIVE': return jsonify(error='organization_inactive',message='Organization is not active'),403
+        access,refresh,sess=_issue(user,membership)
+        audit(actor_id=user.id,organization_id=org.id,action='LOGIN_SUCCESS',resource='session',resource_id=sess.id)
+        db.session.commit()
+        resp=make_response(jsonify(access_token=access,expires_in=settings.access_token_minutes*60,user={'id':user.id,'email':user.email,'role':membership.role,'organization_id':org.id,'is_platform_admin':user.is_platform_admin}))
+        resp.set_cookie('uecp_refresh',refresh,httponly=True,secure=settings.secure_cookies or settings.environment=='production',samesite='Strict',max_age=settings.refresh_token_days*86400,path='/api/v1/auth')
+        return resp
+    except Exception as e:
+        import traceback
+        current_app.logger.error(f"Login error: {e}\n{traceback.format_exc()}")
+        return jsonify(error='login_failure', message=str(e)), 500
 
 @auth_bp.post('/refresh')
 @limiter.limit('20 per minute')
