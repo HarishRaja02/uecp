@@ -50,10 +50,7 @@ def create_app(test_config=None):
     db.init_app(app)
     limiter.init_app(app)
     if settings.cors_origins:
-        origins = [o.strip() for o in settings.cors_origins.split(',') if o.strip()]
-        if 'https://nanviaienterpriseassistant.vercel.app' not in origins:
-            origins.append('https://nanviaienterpriseassistant.vercel.app')
-        CORS(app, origins=origins, supports_credentials=True)
+        CORS(app, origins=settings.cors_origins.split(','), supports_credentials=True)
 
     @app.get('/')
     def index():
@@ -152,79 +149,6 @@ def create_app(test_config=None):
             else:
                 admin_user.status = 'ACTIVE'
                 db.session.commit()
-
-            from app.models import Application, AccessGrant, Credential
-            from hashlib import sha256
-            from datetime import datetime, timezone, timedelta
-            nanvi_app = Application.query.filter_by(id='515c0c0f-56ef-4db9-a11a-3ca265d272a7').first()
-            raw_app_key = 'uecp_KJ2cFJ4N6shuAY1xq2-BrLHw56q49Rv9I75guGVOsf8'
-            if not nanvi_app:
-                nanvi_app = Application(
-                    id='515c0c0f-56ef-4db9-a11a-3ca265d272a7',
-                    name='Nanvi AI Enterprise Assistant',
-                    application_key_hash=sha256(raw_app_key.encode()).hexdigest(),
-                    application_key_last4=raw_app_key[-4:],
-                    capabilities={'chat': True, 'rag': True, 'audit': True},
-                    allowed_origins=[
-                        'http://localhost:5173', 'http://localhost:8000', 'http://127.0.0.1:8000',
-                        'https://nanviaienterpriseassistant.vercel.app'
-                    ],
-                    owner_emails=['admin@uecp.local'],
-                    status='ACTIVE'
-                )
-                db.session.add(nanvi_app)
-                db.session.flush()
-            else:
-                nanvi_app.application_key_hash = sha256(raw_app_key.encode()).hexdigest()
-                nanvi_app.application_key_last4 = raw_app_key[-4:]
-                nanvi_app.status = 'ACTIVE'
-                db.session.commit()
-
-            grant = AccessGrant.query.filter_by(organization_id=org.id, application_id=nanvi_app.id).first()
-            expires_at = datetime.now(timezone.utc) + timedelta(days=365)
-            if not grant:
-                grant = AccessGrant(
-                    organization_id=org.id,
-                    application_id=nanvi_app.id,
-                    plan_id=plan.id,
-                    expires_at=expires_at,
-                    grace_days=14,
-                    status='ACTIVE'
-                )
-                db.session.add(grant)
-                db.session.flush()
-
-            nanvi_creds = [
-                ('b53f18de-4546-4364-9b3c-5ff410dab2d8', 'Nanvi Primary Credential', 'uecp_cred_s-p3EIGFCUpbv8usqcFqQuqWgl2wrJKkKcv2ZUrDyZo'),
-                ('525fd565-8d7c-4648-a4db-2db94cc6d5fa', 'Nanvi Secondary Backup Credential', 'uecp_cred_exys1oxszozn-odvZb_waUfV5S7d5ALYP5imumV9hTs'),
-                ('d3d0dece-5080-4c0d-a081-204139059739', 'Nanvi Worker Agent Credential', 'uecp_cred_THCN54mOjCpXuFBUxHpvoYNs6XX348d6-i1-PTcR6rw'),
-            ]
-            for c_id, c_name, c_secret in nanvi_creds:
-                cred = Credential.query.filter_by(id=c_id).first()
-                if not cred:
-                    cred = Credential(
-                        id=c_id,
-                        application_id=nanvi_app.id,
-                        organization_id=org.id,
-                        access_grant_id=grant.id,
-                        name=c_name,
-                        kind='ROOT',
-                        expires_at=expires_at,
-                        secret_hash=hash_password(c_secret),
-                        legacy_secret_ciphertext='',
-                        secret_last4=c_secret[-4:],
-                        permissions=['ai:chat', 'ai:search', 'enterprise:access'],
-                        status='ACTIVE',
-                        root_id=c_id,
-                        depth=0,
-                        path=f'/{c_id}/'
-                    )
-                    db.session.add(cred)
-                else:
-                    cred.secret_hash = hash_password(c_secret)
-                    cred.status = 'ACTIVE'
-                    cred.secret_last4 = c_secret[-4:]
-            db.session.commit()
         except Exception as err:
             app.logger.warning(f"Database auto-setup: {err}")
 
