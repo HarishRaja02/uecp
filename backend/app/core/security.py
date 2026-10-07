@@ -48,7 +48,7 @@ def load_key(path, env_var=None):
     if p.exists():
         return p.read_text(encoding='utf-8')
     priv, pub = _get_ephemeral_keys()
-    if env_var and 'PRIVATE' in env_var:
+    if (env_var and 'PRIVATE' in env_var) or 'private' in str(path).lower():
         return priv
     return pub
 

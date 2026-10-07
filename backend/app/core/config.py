@@ -24,6 +24,22 @@ def resolve_database_url():
         raw = 'postgresql+psycopg://' + raw[len('postgres://'):]
     elif raw.startswith('postgresql://'):
         raw = 'postgresql+psycopg://' + raw[len('postgresql://'):]
+    if raw.startswith('postgresql+psycopg://'):
+        if 'sslmode=' not in raw:
+            sep = '&' if '?' in raw else '?'
+            raw = f"{raw}{sep}sslmode=require"
+        if 'hostaddr=' not in raw:
+            try:
+                import urllib.parse
+                import socket
+                parsed = urllib.parse.urlparse(raw)
+                if parsed.hostname and not parsed.hostname.replace('.', '').isdigit():
+                    ip = socket.gethostbyname(parsed.hostname)
+                    if ip:
+                        sep = '&' if '?' in raw else '?'
+                        raw = f"{raw}{sep}hostaddr={ip}"
+            except Exception:
+                pass
     if raw.startswith('sqlite:///./'):
         rel = raw[len('sqlite:///./'):]
         if os.getenv('VERCEL'):

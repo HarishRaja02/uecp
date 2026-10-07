@@ -1,3 +1,4 @@
+import os
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_limiter import Limiter
@@ -14,13 +15,36 @@ from app.api.credentials import credentials_bp
 
 def create_app(test_config=None):
     app = Flask(__name__)
+    db_url = settings.database_url
+    engine_options = {}
+
+    if os.getenv('VERCEL'):
+        from sqlalchemy.pool import NullPool
+        engine_options['poolclass'] = NullPool
+
+    if 'postgres' in db_url:
+        engine_options['connect_args'] = {'connect_timeout': 3}
+        if os.getenv('VERCEL'):
+            try:
+                from sqlalchemy import create_engine, text
+                test_engine = create_engine(db_url, poolclass=NullPool, connect_args={'connect_timeout': 3})
+                with test_engine.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+                test_engine.dispose()
+            except Exception as err:
+                app.logger.warning(f"PostgreSQL connection failed ({err}). Falling back to SQLite at /tmp/uecp.db")
+                db_url = "sqlite:////tmp/uecp.db"
+                engine_options = {}
+
     app.config.update(
         SECRET_KEY=settings.flask_secret_key,
-        SQLALCHEMY_DATABASE_URI=settings.database_url,
+        SQLALCHEMY_DATABASE_URI=db_url,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         MAX_CONTENT_LENGTH=2 * 1024 * 1024,
         JSON_SORT_KEYS=False,
     )
+    if engine_options:
+        app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options
     if test_config:
         app.config.update(test_config)
     db.init_app(app)
@@ -114,12 +138,16 @@ def create_app(test_config=None):
                 if plan:
                     db.session.add(Subscription(organization_id=org.id, plan_id=plan.id, status='ACTIVE'))
                 db.session.commit()
-            if not User.query.filter_by(email='admin@uecp.local').first():
-                admin_pw = os.getenv('SEED_ADMIN_PASSWORD', 'ChangeThisAdminPassword!2026')
+            admin_user = User.query.filter_by(email='admin@uecp.local').first()
+            admin_pw = os.getenv('SEED_ADMIN_PASSWORD', 'ChangeThisAdminPassword!2026')
+            if not admin_user:
                 admin_user = User(email='admin@uecp.local', password_hash=hash_password(admin_pw), is_platform_admin=True)
                 db.session.add(admin_user)
                 db.session.flush()
                 db.session.add(Membership(user_id=admin_user.id, organization_id=org.id, role='SUPER_ADMIN'))
+                db.session.commit()
+            else:
+                admin_user.status = 'ACTIVE'
                 db.session.commit()
         except Exception as err:
             app.logger.warning(f"Database auto-setup: {err}")
