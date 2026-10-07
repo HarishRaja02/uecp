@@ -2,3 +2,18 @@
 name = "uecp"
 version = "1.0.0"
 requires-python = "~=3.12.0"
+dependencies = [
+    "Flask>=3.1.0",
+    "Flask-Cors>=5.0.1",
+    "Flask-Limiter>=3.10.1",
+    "Flask-SQLAlchemy>=3.1.1",
+    "SQLAlchemy>=2.0.40",
+    "alembic>=1.15.2",
+    "psycopg[binary]>=3.2.13",
+    "argon2-cffi>=23.1.0",
+    "python-jose[cryptography]>=3.4.0",
+    "pydantic>=2.11.3",
+    "email-validator>=2.2.0",
+    "redis>=5.2.1",
+    "python-dotenv>=1.1.0",
+]
