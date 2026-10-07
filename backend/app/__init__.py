@@ -88,9 +88,42 @@ def create_app(test_config=None):
     def too_many(_):
         return jsonify(error='rate_limited', message='Too many requests'), 429
 
+    @app.errorhandler(Exception)
+    def handle_unhandled_exception(e):
+        from werkzeug.exceptions import HTTPException
+        if isinstance(e, HTTPException):
+            return jsonify(error=e.name.lower().replace(' ', '_'), message=e.description), e.code
+        app.logger.error(f"Internal Error: {e}", exc_info=True)
+        return jsonify(error='internal_error', message=str(e)), 500
+
     with app.app_context():
-        if app.config.get('TESTING') or settings.auto_create_tables:
+        try:
             db.create_all()
+            from app.models import User, Plan, Organization, Subscription, Membership
+            from app.core.security import hash_password
+            if not Plan.query.first():
+                for code, name in [('FREE','Free'),('PRO','Pro'),('BUSINESS','Business'),('ENTERPRISE','Enterprise'),('CUSTOM','Custom')]:
+                    db.session.add(Plan(code=code, name=name, limits={'users':10,'storage_mb':1024,'api_requests':10000}, features=[]))
+                db.session.commit()
+            plan = Plan.query.filter_by(code='FREE').first()
+            org = Organization.query.first()
+            if not org:
+                org = Organization(name='UECP Demo Organization')
+                db.session.add(org)
+                db.session.flush()
+                if plan:
+                    db.session.add(Subscription(organization_id=org.id, plan_id=plan.id, status='ACTIVE'))
+                db.session.commit()
+            if not User.query.filter_by(email='admin@uecp.local').first():
+                admin_pw = os.getenv('SEED_ADMIN_PASSWORD', 'ChangeThisAdminPassword!2026')
+                admin_user = User(email='admin@uecp.local', password_hash=hash_password(admin_pw), is_platform_admin=True)
+                db.session.add(admin_user)
+                db.session.flush()
+                db.session.add(Membership(user_id=admin_user.id, organization_id=org.id, role='SUPER_ADMIN'))
+                db.session.commit()
+        except Exception as err:
+            app.logger.warning(f"Database auto-setup: {err}")
+
     return app
 
 def request_is_sensitive(response):

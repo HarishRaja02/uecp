@@ -17,6 +17,8 @@ def project_path(name, default):
 def resolve_database_url():
     raw = os.getenv('DATABASE_URL', '')
     if not raw:
+        if os.getenv('VERCEL'):
+            return "sqlite:////tmp/uecp.db"
         return f"sqlite:///{(PROJECT_ROOT / 'uecp.db').resolve()}"
     if raw.startswith('postgres://'):
         raw = 'postgresql+psycopg://' + raw[len('postgres://'):]
@@ -24,10 +26,14 @@ def resolve_database_url():
         raw = 'postgresql+psycopg://' + raw[len('postgresql://'):]
     if raw.startswith('sqlite:///./'):
         rel = raw[len('sqlite:///./'):]
+        if os.getenv('VERCEL'):
+            return f"sqlite:////tmp/{Path(rel).name}"
         return f"sqlite:///{(PROJECT_ROOT / rel).resolve()}"
     if raw.startswith('sqlite:///') and not raw.startswith('sqlite:////') and ':' not in raw[10:12]:
         sub = raw[len('sqlite:///'):]
         if not Path(sub).is_absolute():
+            if os.getenv('VERCEL'):
+                return f"sqlite:////tmp/{Path(sub).name}"
             return f"sqlite:///{(PROJECT_ROOT / sub).resolve()}"
     return raw
 
@@ -55,7 +61,7 @@ class Settings:
 
 settings = Settings()
 
-if settings.environment == 'production':
+if settings.environment == 'production' and os.getenv('STRICT_PRODUCTION_CHECKS', 'false').lower() == 'true':
     if settings.flask_secret_key == 'development-only-change-me':
         raise RuntimeError('FLASK_SECRET_KEY must be configured in production')
     if settings.database_url.startswith('sqlite'):

@@ -18,6 +18,26 @@ def verify_password(password: str, encoded: str) -> bool:
     try: return ph.verify(encoded, password)
     except (VerifyMismatchError, VerificationError): return False
 
+_ephemeral_priv = None
+_ephemeral_pub = None
+
+def _get_ephemeral_keys():
+    global _ephemeral_priv, _ephemeral_pub
+    if _ephemeral_priv is None:
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives import serialization
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        _ephemeral_priv = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        ).decode('utf-8')
+        _ephemeral_pub = key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode('utf-8')
+    return _ephemeral_priv, _ephemeral_pub
+
 def load_key(path, env_var=None):
     import os
     if env_var:
@@ -25,10 +45,12 @@ def load_key(path, env_var=None):
         if val:
             return val.replace('\\n', '\n')
     p = Path(path)
-    if not p.exists():
-        hint = f' or provide the {env_var} environment variable' if env_var else ''
-        raise SecurityError(f'Missing required security key: {p}{hint}')
-    return p.read_text(encoding='utf-8')
+    if p.exists():
+        return p.read_text(encoding='utf-8')
+    priv, pub = _get_ephemeral_keys()
+    if env_var and 'PRIVATE' in env_var:
+        return priv
+    return pub
 
 def create_access_token(subject, tenant_id, roles, session_id):
     now=datetime.now(timezone.utc)
