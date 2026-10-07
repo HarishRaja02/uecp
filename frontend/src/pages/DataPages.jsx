@@ -30,7 +30,7 @@ import {
   Clock,
   SlidersHorizontal,
 } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, API_BASE } from '../lib/api';
 import Table from '../components/Table';
 import { PageTitle } from './Overview';
 import { useToast } from '../components/Toast';
@@ -788,7 +788,7 @@ export function Applications() {
             </p>
             <div className="code-box">
               <pre>{`UECP_ENABLED=true
-UECP_BASE_URL=http://localhost:8001
+UECP_BASE_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8001'}
 UECP_APPLICATION_ID=${configModal.id}
 UECP_APPLICATION_KEY=your_uecp_application_key
 UECP_CREDENTIAL_ID=your_uecp_credential_id
@@ -799,7 +799,7 @@ UECP_ALLOW_INSECURE_HTTP=true`}</pre>
             </div>
             <div className="modal-actions">
               <CopyButton
-                text={`UECP_ENABLED=true\nUECP_BASE_URL=http://localhost:8001\nUECP_APPLICATION_ID=${configModal.id}\nUECP_APPLICATION_KEY=your_uecp_application_key\nUECP_CREDENTIAL_ID=your_uecp_credential_id\nUECP_CREDENTIAL_SECRET=your_uecp_credential_secret\nUECP_VALIDATION_TIMEOUT_SECONDS=5\nUECP_CACHE_TTL_SECONDS=60\nUECP_ALLOW_INSECURE_HTTP=true`}
+                text={`UECP_ENABLED=true\nUECP_BASE_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8001'}\nUECP_APPLICATION_ID=${configModal.id}\nUECP_APPLICATION_KEY=your_uecp_application_key\nUECP_CREDENTIAL_ID=your_uecp_credential_id\nUECP_CREDENTIAL_SECRET=your_uecp_credential_secret\nUECP_VALIDATION_TIMEOUT_SECONDS=5\nUECP_CACHE_TTL_SECONDS=60\nUECP_ALLOW_INSECURE_HTTP=true`}
                 label="Copy Configuration Template"
               />
               <button className="primary" onClick={() => setConfigModal(null)}>
@@ -1288,7 +1288,7 @@ export function Integrations() {
     setTesting(true);
     setTestResult(null);
     try {
-      const resp = await fetch('http://localhost:8001/api/v1/credentials/validate', {
+      const resp = await fetch(`${API_BASE}/credentials/validate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1417,7 +1417,7 @@ export function Integrations() {
           <pre>{`# Universal Enterprise Control Plane (UECP) Integration
 # Credential Selected: ${currentCred.name} (${currentCred.role})
 UECP_ENABLED=true
-UECP_BASE_URL=http://localhost:8001
+UECP_BASE_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8001'}
 UECP_APPLICATION_ID=515c0c0f-56ef-4db9-a11a-3ca265d272a7
 UECP_APPLICATION_KEY=uecp_KJ2cFJ4N6shuAY1xq2-BrLHw56q49Rv9I75guGVOsf8
 UECP_CREDENTIAL_ID=${currentCred.id}
@@ -1429,7 +1429,7 @@ UECP_ALLOW_INSECURE_HTTP=true`}</pre>
 
         <div className="config-actions">
           <CopyButton
-            text={`UECP_ENABLED=true\nUECP_BASE_URL=http://localhost:8001\nUECP_APPLICATION_ID=515c0c0f-56ef-4db9-a11a-3ca265d272a7\nUECP_APPLICATION_KEY=uecp_KJ2cFJ4N6shuAY1xq2-BrLHw56q49Rv9I75guGVOsf8\nUECP_CREDENTIAL_ID=${currentCred.id}\nUECP_CREDENTIAL_SECRET=${currentCred.secret}\nUECP_VALIDATION_TIMEOUT_SECONDS=5\nUECP_CACHE_TTL_SECONDS=60\nUECP_ALLOW_INSECURE_HTTP=true`}
+            text={`UECP_ENABLED=true\nUECP_BASE_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8001'}\nUECP_APPLICATION_ID=515c0c0f-56ef-4db9-a11a-3ca265d272a7\nUECP_APPLICATION_KEY=uecp_KJ2cFJ4N6shuAY1xq2-BrLHw56q49Rv9I75guGVOsf8\nUECP_CREDENTIAL_ID=${currentCred.id}\nUECP_CREDENTIAL_SECRET=${currentCred.secret}\nUECP_VALIDATION_TIMEOUT_SECONDS=5\nUECP_CACHE_TTL_SECONDS=60\nUECP_ALLOW_INSECURE_HTTP=true`}
             label={`Copy ${currentCred.name} .env`}
           />
         </div>

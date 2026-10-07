@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { API_BASE } from '../lib/api';
 import {
   Shield,
   LayoutDashboard,
@@ -84,14 +85,14 @@ export default function Layout({ section, setSection, onLogout, children }) {
           </div>
           <div className="side-actions">
             <a
-              href="http://localhost:8001/api/v1/health"
+              href={`${API_BASE}/health`}
               target="_blank"
               rel="noreferrer"
               className="side-link"
               title="API Health check"
             >
               <Radio size={14} className="health-dot" />
-              <span>API Health: 8001</span>
+              <span>API Health</span>
               <ExternalLink size={12} />
             </a>
             <button className="signout-btn" onClick={onLogout}>
