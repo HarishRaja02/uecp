@@ -3,7 +3,8 @@
   "services": {
     "api": {
       "root": ".",
-      "framework": "flask"
+      "framework": "flask",
+      "entrypoint": "api/index:app"
     },
     "frontend": {
       "root": "frontend",
