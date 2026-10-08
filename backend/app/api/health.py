@@ -1,46 +1,40 @@
 import os
 import socket
 import urllib.parse
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 health_bp = Blueprint('health', __name__)
 
+_DNS_CACHE = None
+_TABLES_CACHE = None
+
 @health_bp.get('/health')
 def health():
+    global _DNS_CACHE, _TABLES_CACHE
     db_raw = os.getenv('DATABASE_URL', '')
     parsed = urllib.parse.urlparse(db_raw) if db_raw else None
 
-    dns_info = {}
-    if parsed and parsed.hostname:
-        dns_info['hostname'] = parsed.hostname
-        dns_info['port'] = parsed.port or 5432
+    if _DNS_CACHE is None and parsed and parsed.hostname:
+        dns_info = {'hostname': parsed.hostname, 'port': parsed.port or 5432}
         try:
             dns_info['ipv4'] = socket.gethostbyname(parsed.hostname)
         except Exception as e:
             dns_info['ipv4_error'] = f"{type(e).__name__}: {e}"
-
-        try:
-            addr_info = socket.getaddrinfo(parsed.hostname, parsed.port or 5432, socket.AF_INET, socket.SOCK_STREAM)
-            dns_info['getaddrinfo_ipv4'] = [item[4][0] for item in addr_info]
-        except Exception as e:
-            dns_info['getaddrinfo_ipv4_error'] = f"{type(e).__name__}: {e}"
-
-        try:
-            addr_all = socket.getaddrinfo(parsed.hostname, parsed.port or 5432, 0, socket.SOCK_STREAM)
-            dns_info['getaddrinfo_all'] = [item[4][0] for item in addr_all]
-        except Exception as e:
-            dns_info['getaddrinfo_all_error'] = f"{type(e).__name__}: {e}"
+        _DNS_CACHE = dns_info
+    dns_info = _DNS_CACHE or {}
 
     db_status = 'ok'
-    tables = []
+    tables = _TABLES_CACHE or []
     try:
         from app.db import db
         from sqlalchemy import text
         with db.engine.connect() as conn:
             val = conn.execute(text("SELECT 1")).scalar()
             db_status = f"connected (select 1 = {val})"
-        from sqlalchemy import inspect
-        tables = inspect(db.engine).get_table_names()
+        if not _TABLES_CACHE:
+            from sqlalchemy import inspect
+            _TABLES_CACHE = inspect(db.engine).get_table_names()
+            tables = _TABLES_CACHE
     except Exception as e:
         db_status = f"{type(e).__name__}: {str(e)}"
 

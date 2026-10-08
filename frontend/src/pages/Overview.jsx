@@ -13,6 +13,8 @@ import {
   ArrowUpRight,
   ShieldAlert,
   Clock,
+  Sparkles,
+  Zap,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useToast } from '../components/Toast';
@@ -36,11 +38,11 @@ export default function Overview() {
   const [loading, setLoading] = useState(true);
   const toast = useToast();
 
-  const loadData = () => {
+  const loadData = (forceFresh = false) => {
     setLoading(true);
     Promise.all([
-      api('/admin/overview').catch(() => null),
-      api('/admin/audit?limit=5').catch(() => ({ items: [] })),
+      api('/admin/overview', { fresh: forceFresh }).catch(() => null),
+      api('/admin/audit?limit=6', { fresh: forceFresh }).catch(() => ({ items: [] })),
     ])
       .then(([overviewData, auditData]) => {
         if (overviewData) setData(overviewData);
@@ -50,19 +52,19 @@ export default function Overview() {
   };
 
   useEffect(() => {
-    loadData();
+    loadData(false);
   }, []);
 
   const handleRefresh = () => {
-    loadData();
-    toast.info('Dashboard metrics updated');
+    loadData(true);
+    toast.info('Metrics refreshed from control plane');
   };
 
   const cards = [
     {
       key: 'active_applications',
       label: 'Client Applications',
-      desc: 'Registered services',
+      desc: 'Active connected clients',
       icon: Boxes,
       color: 'blue',
       value: data?.active_applications ?? 0,
@@ -70,9 +72,9 @@ export default function Overview() {
     {
       key: 'organizations',
       label: 'Tenant Organizations',
-      desc: 'Active isolated scopes',
+      desc: 'Isolated scopes',
       icon: Building2,
-      color: 'indigo',
+      color: 'lime',
       value: data?.organizations ?? 0,
     },
     {
@@ -86,23 +88,23 @@ export default function Overview() {
     {
       key: 'active_sessions',
       label: 'Active Sessions',
-      desc: 'Live refresh cookies',
+      desc: 'Live authenticated sessions',
       icon: Activity,
-      color: 'purple',
+      color: 'cyan',
       value: data?.active_sessions ?? 0,
     },
     {
       key: 'security_alerts',
       label: 'Security Alerts',
-      desc: data?.security_alerts ? 'Action required' : 'All clear',
+      desc: data?.security_alerts ? 'Action required' : 'All systems normal',
       icon: data?.security_alerts ? AlertTriangle : ShieldCheck,
-      color: data?.security_alerts ? 'amber' : 'gray',
+      color: data?.security_alerts ? 'amber' : 'green',
       value: data?.security_alerts ?? 0,
     },
     {
       key: 'subscription_issues',
       label: 'Subscription Issues',
-      desc: data?.subscription_issues ? 'Past due / expired' : 'In good standing',
+      desc: data?.subscription_issues ? 'Attention needed' : 'All active',
       icon: Lock,
       color: data?.subscription_issues ? 'rose' : 'gray',
       value: data?.subscription_issues ?? 0,
@@ -111,15 +113,34 @@ export default function Overview() {
 
   return (
     <div className="overview-container">
-      <PageTitle
-        title="Overview"
-        text="Real-time control-plane posture, tenant status, and system activity."
-        action={
-          <button className="secondary small" onClick={handleRefresh} disabled={loading}>
+      {/* Hero Banner with Logo & System Posture */}
+      <div className="overview-hero">
+        <div className="hero-content">
+          <div className="hero-logo-badge">
+            <img src="/logo.png" alt="Nanvi Logo" className="hero-logo-img" />
+          </div>
+          <div className="hero-text">
+            <div className="hero-tag">
+              <span className="hero-pulse" />
+              <span>UNIVERSAL CONTROL PLANE • ZERO-TRUST ARCHITECTURE</span>
+            </div>
+            <h2>Enterprise Identity & Authorization Fabric</h2>
+            <p>
+              Unified administrative oversight across tenant boundaries, API credentials, real-time threat detection, and subscription tiers.
+            </p>
+          </div>
+        </div>
+        <div className="hero-actions">
+          <button className="primary small hero-btn" onClick={handleRefresh} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'spin' : ''} />
-            <span>Refresh</span>
+            <span>{loading ? 'Syncing…' : 'Sync Metrics'}</span>
           </button>
-        }
+        </div>
+      </div>
+
+      <PageTitle
+        title="Telemetry & Resources"
+        text="Real-time control plane health metrics and active tenant allocation."
       />
 
       <div className="metric-grid">
@@ -134,7 +155,7 @@ export default function Overview() {
                 </div>
               </div>
               <div className="metric-value">
-                <strong>{loading ? '—' : c.value}</strong>
+                <strong>{loading && !data ? '…' : c.value}</strong>
               </div>
               <div className="metric-footer">
                 <span className="metric-desc">{c.desc}</span>
@@ -148,45 +169,45 @@ export default function Overview() {
         <div className="panel posture-panel">
           <div className="panel-head">
             <div>
-              <h2>Control Plane Enforcement</h2>
-              <p>Active security layers protecting client applications</p>
+              <h2>Control Plane Policy Enforcement</h2>
+              <p>Active cryptographic and operational controls</p>
             </div>
             <span className="pill success">
-              <span className="dot-green" /> Operational
+              <span className="dot-green" /> Enforced
             </span>
           </div>
 
           <div className="posture-grid">
             <div className="posture-item">
               <div className="posture-header">
-                <CheckCircle2 size={16} className="text-emerald" />
-                <b>Authentication & Identity</b>
+                <CheckCircle2 size={16} className="text-lime" />
+                <b>Cryptographic Auth Tokens</b>
               </div>
-              <p>RS256 short-lived access tokens with rotating HttpOnly SameSite refresh sessions.</p>
+              <p>RS256 asymmetric signatures with rotating HttpOnly credentials & fast session cache.</p>
             </div>
 
             <div className="posture-item">
               <div className="posture-header">
-                <CheckCircle2 size={16} className="text-emerald" />
+                <CheckCircle2 size={16} className="text-lime" />
                 <b>Hierarchical Credential Engine</b>
               </div>
-              <p>Root and scoped child credentials with recursive ancestor denial propagation.</p>
+              <p>Root and scoped child keys with instantaneous subtree freeze and parent revocation.</p>
             </div>
 
             <div className="posture-item">
               <div className="posture-header">
-                <CheckCircle2 size={16} className="text-emerald" />
-                <b>Multi-Tenant Isolation</b>
+                <CheckCircle2 size={16} className="text-lime" />
+                <b>Multi-Tenant Boundaries</b>
               </div>
-              <p>Strict organization scopes validated server-side on every API decision.</p>
+              <p>Strict cryptographic isolation verified on every control plane dispatch.</p>
             </div>
 
             <div className="posture-item">
               <div className="posture-header">
-                <CheckCircle2 size={16} className="text-emerald" />
-                <b>Fail-Closed Authorization</b>
+                <CheckCircle2 size={16} className="text-lime" />
+                <b>Fail-Closed Security Posture</b>
               </div>
-              <p>Deny-by-default on credential freeze, subscription lapse, or service outage.</p>
+              <p>Deny-by-default on credential anomalies, lapsed tiers, or unauthorized gateways.</p>
             </div>
           </div>
         </div>
@@ -194,7 +215,7 @@ export default function Overview() {
         <div className="panel activity-panel">
           <div className="panel-head">
             <div>
-              <h2>Recent Audit Activity</h2>
+              <h2>Recent Audit Events</h2>
               <p>Real-time stream of security decisions</p>
             </div>
             <Clock size={16} className="text-muted" />

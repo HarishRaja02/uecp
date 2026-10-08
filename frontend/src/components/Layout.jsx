@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { API_BASE } from '../lib/api';
 import {
-  Shield,
   LayoutDashboard,
   Boxes,
   Building2,
@@ -16,6 +15,7 @@ import {
   X,
   ExternalLink,
   Radio,
+  Zap,
 } from 'lucide-react';
 
 const items = [
@@ -37,21 +37,21 @@ export default function Layout({ section, setSection, onLogout, children }) {
     <div className="shell">
       <aside className={open ? 'open' : ''}>
         <div className="brand">
-          <div className="brand-logo">
-            <Shield size={22} />
+          <div className="brand-logo-container">
+            <img src="/logo.png" alt="Nanvi AI Logo" className="brand-logo-img" />
           </div>
           <div className="brand-text">
-            <b>UECP</b>
+            <b>NANVI <span className="gradient-accent">AI</span></b>
             <small>CONTROL PLANE</small>
           </div>
-          <button className="mobile-close" onClick={() => setOpen(false)}>
+          <button className="mobile-close" onClick={() => setOpen(false)} aria-label="Close navigation">
             <X size={18} />
           </button>
         </div>
 
         <div className="env-pill">
           <span className="live-dot" />
-          <span>DEVELOPMENT • STANDALONE</span>
+          <span>PRODUCTION READY • ACTIVE</span>
         </div>
 
         <nav>
@@ -92,7 +92,7 @@ export default function Layout({ section, setSection, onLogout, children }) {
               title="API Health check"
             >
               <Radio size={14} className="health-dot" />
-              <span>API Health</span>
+              <span>API Health & Latency</span>
               <ExternalLink size={12} />
             </a>
             <button className="signout-btn" onClick={onLogout}>
@@ -104,23 +104,27 @@ export default function Layout({ section, setSection, onLogout, children }) {
       </aside>
 
       <div className="mobile-bar">
-        <button className="mobile-toggle" onClick={() => setOpen(true)}>
+        <button className="mobile-toggle" onClick={() => setOpen(true)} aria-label="Open menu">
           <Menu size={20} />
         </button>
         <div className="mobile-brand">
-          <Shield size={18} />
-          <span>UECP Admin</span>
+          <img src="/logo.png" alt="Nanvi Logo" className="mobile-logo-img" />
+          <span>Nanvi AI Control Plane</span>
         </div>
       </div>
 
       <main>
         <div className="top-banner">
           <div className="breadcrumbs">
-            <span>Control Plane</span>
+            <span className="bread-home">Control Plane</span>
             <span className="sep">/</span>
             <span className="current">{section}</span>
           </div>
           <div className="top-stats">
+            <span className="engine-badge">
+              <Zap size={13} className="engine-icon" />
+              <span className="engine-text">High-Throughput Gateway</span>
+            </span>
             <span className="server-status">
               <span className="status-indicator-green" /> Core Engine Active
             </span>

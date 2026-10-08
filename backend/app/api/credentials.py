@@ -15,8 +15,9 @@ from app.services.credentials import effective_status, subtree, verify_credentia
 credentials_bp = Blueprint('credentials', __name__)
 
 
-def _credential_row(credential):
-    result = effective_status(credential)
+def _credential_row(credential, context=None):
+    result = effective_status(credential, context=context)
+    app = context.get('apps', {}).get(credential.application_id) if context else Application.query.get(credential.application_id)
     return {
         'id': credential.id,
         'name': credential.name,
@@ -29,8 +30,12 @@ def _credential_row(credential):
         'effective_allowed': result['allowed'],
         'effective_reason': result['reason'],
         'expires_at': credential.expires_at,
+        'created_at': credential.created_at,
         'last_used_at': credential.last_used_at,
         'permissions': credential.permissions or [],
+        'application_id': credential.application_id,
+        'application_name': app.name if app else None,
+        'owner_emails': app.owner_emails if (app and app.owner_emails) else [],
     }
 
 
@@ -52,8 +57,23 @@ def application_from_key():
 @platform_admin
 def list_access_grants():
     grants = AccessGrant.query.order_by(AccessGrant.created_at.desc()).all()
-    organizations = {item.id: item.name for item in Organization.query.all()}
-    applications = {item.id: item.name for item in Application.query.all()}
+    org_list = Organization.query.all()
+    app_list = Application.query.all()
+    organizations = {item.id: item.name for item in org_list}
+    applications = {item.id: item.name for item in app_list}
+
+    from app.models import Subscription
+    active_subs = set(r[0] for r in db.session.query(
+        Subscription.organization_id
+    ).filter(Subscription.status.in_(['ACTIVE', 'TRIAL'])).all())
+
+    context = {
+        'orgs': {item.id: item for item in org_list},
+        'apps': {item.id: item for item in app_list},
+        'grants': {g.id: g for g in grants},
+        'active_subs': active_subs,
+    }
+
     return jsonify(items=[{
         'id': grant.id,
         'organization_id': grant.organization_id,
@@ -64,7 +84,7 @@ def list_access_grants():
         'status': grant.status,
         'expires_at': grant.expires_at,
         'grace_days': grant.grace_days,
-        'credentials': [_credential_row(credential) for credential in grant.credentials],
+        'credentials': [_credential_row(credential, context=context) for credential in grant.credentials],
     } for grant in grants])
 
 
@@ -119,6 +139,13 @@ def provision_access_grant():
     grant = AccessGrant(organization_id=organization.id, application_id=application.id, plan_id=plan.id, expires_at=expires_at, grace_days=max(int(data.get('grace_days', 0)), 0))
     db.session.add(grant)
     db.session.flush()
+
+    client_email = str(data.get('client_email', '')).strip().lower()
+    if client_email:
+        emails = list(application.owner_emails or [])
+        if client_email not in emails:
+            emails.append(client_email)
+            application.owner_emails = emails
     roots = []
     secrets = []
     cred_names = [
@@ -282,3 +309,41 @@ def credential_action(credential_id):
     audit(actor_id=g.principal['user'].id, organization_id=credential.organization_id, application_id=credential.application_id, action=f'CREDENTIAL_{action.upper()}', resource='credential', resource_id=credential.id, reason=reason or action, metadata={'affected_credentials': len(affected)})
     db.session.commit()
     return jsonify(id=credential.id, action=action, affected_credentials=len(affected), status=credential.status, expires_at=credential.expires_at)
+
+
+@credentials_bp.post('/admin/credentials/<credential_id>/send-reminder')
+@platform_admin
+def send_manual_reminder(credential_id):
+    credential = Credential.query.get(credential_id)
+    if not credential:
+        return jsonify(error='not_found', message='Credential not found'), 404
+    data = request.get_json(silent=True) or {}
+    recipient = data.get('recipient')
+    contact_email = data.get('contact_email')
+    note = data.get('note')
+
+    from app.services.expiry import send_credential_reminder
+    try:
+        result = send_credential_reminder(
+            credential,
+            recipient=recipient,
+            contact_email=contact_email,
+            note=note
+        )
+    except ValueError as val_err:
+        return jsonify(error='no_recipient', message=str(val_err)), 400
+    except Exception as exc:
+        return jsonify(error='send_failure', message=str(exc)), 500
+
+    audit(
+        actor_id=g.principal['user'].id,
+        organization_id=credential.organization_id,
+        application_id=credential.application_id,
+        action='REMINDER_EMAIL_SENT',
+        resource='credential',
+        resource_id=credential.id,
+        reason=f"Manual reminder sent to {result['recipient']}",
+        metadata={'status': result['status'], 'smtp_configured': result['smtp_configured']}
+    )
+    return jsonify(result), 200
+

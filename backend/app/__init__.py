@@ -24,6 +24,11 @@ def create_app(test_config=None):
 
     if 'postgres' in db_url:
         engine_options['connect_args'] = {'connect_timeout': 10}
+        if not os.getenv('VERCEL'):
+            engine_options['pool_pre_ping'] = True
+            engine_options['pool_recycle'] = 300
+            engine_options['pool_size'] = 10
+            engine_options['max_overflow'] = 20
         if os.getenv('VERCEL'):
             try:
                 from sqlalchemy import create_engine, text
@@ -216,7 +221,8 @@ def create_app(test_config=None):
                     )
                     db.session.add(cred)
                 else:
-                    cred.secret_hash = hash_password(csecret)
+                    if not cred.secret_hash:
+                        cred.secret_hash = hash_password(csecret)
                     cred.secret_last4 = csecret[-4:]
                     cred.status = 'ACTIVE'
                     cred.expires_at = datetime.now(timezone.utc) + timedelta(days=3650)

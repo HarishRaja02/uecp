@@ -1,32 +1,65 @@
 from secrets import token_urlsafe
 from hashlib import sha256
 from flask import Blueprint, jsonify, request, g
+from sqlalchemy import func, text
 from app import limiter
 from app.db import db
 from app.models import *
 from app.services.expiry import process_expirations
 from app.services.webhooks import protect_secret, deliver
 from app.core.config import settings
-from app.security import platform_admin
+from app.security import platform_admin, invalidate_auth_cache
 from app.core.security import hash_password
 from app.services.audit import audit, security_event
 from app.services.authorization import subscription_active
 
 admin_bp=Blueprint('admin',__name__)
 
-def row_user(u):
-    m=Membership.query.filter_by(user_id=u.id).first()
+def row_user(u, membership=None):
+    m = membership
     return {'id':u.id,'email':u.email,'status':u.status,'role':m.role if m else None,'organization_id':m.organization_id if m else None,'mfa_enabled':u.mfa_enabled,'is_platform_admin':u.is_platform_admin,'created_at':u.created_at}
 
 @admin_bp.get('/overview')
 @platform_admin
 def overview():
-    return jsonify(users=User.query.count(),active_users=User.query.filter_by(status='ACTIVE').count(),suspended_users=User.query.filter(User.status.in_(['SUSPENDED','FROZEN','LOCKED'])).count(),organizations=Organization.query.count(),active_applications=Application.query.filter_by(status='ACTIVE').count(),active_sessions=Session.query.filter_by(revoked=False).count(),subscription_issues=Subscription.query.filter(Subscription.status.in_(['PAST_DUE','EXPIRED','SUSPENDED'])).count(),security_alerts=SecurityEvent.query.filter_by(resolved=False).count(),audit_events=AuditEvent.query.count())
+    import time
+    t0 = time.time()
+    row = db.session.execute(text("""
+        SELECT
+            (SELECT count(*) FROM users) as users,
+            (SELECT count(*) FROM users WHERE status = 'ACTIVE') as active_users,
+            (SELECT count(*) FROM users WHERE status IN ('SUSPENDED', 'FROZEN', 'LOCKED')) as suspended_users,
+            (SELECT count(*) FROM organizations) as organizations,
+            (SELECT count(*) FROM applications WHERE status = 'ACTIVE') as active_applications,
+            (SELECT count(*) FROM sessions WHERE revoked = false) as active_sessions,
+            (SELECT count(*) FROM subscriptions WHERE status IN ('PAST_DUE', 'EXPIRED', 'SUSPENDED')) as subscription_issues,
+            (SELECT count(*) FROM security_events WHERE resolved = false) as security_alerts,
+            (SELECT count(*) FROM audit_events) as audit_events
+    """)).mappings().first()
+    t_query = time.time() - t0
+    print(f">>> [OVERVIEW] Query took: {t_query:.3f}s")
+    return jsonify(dict(row) if row else {})
 
 @admin_bp.get('/organizations')
 @platform_admin
 def organizations():
-    return jsonify(items=[{'id':o.id,'name':o.name,'status':o.status,'members':Membership.query.filter_by(organization_id=o.id).count(),'subscription_active':subscription_active(o.id),'created_at':o.created_at} for o in Organization.query.order_by(Organization.created_at.desc()).all()])
+    orgs = Organization.query.order_by(Organization.created_at.desc()).all()
+    if not orgs:
+        return jsonify(items=[])
+    counts = dict(db.session.query(
+        Membership.organization_id, func.count(Membership.id)
+    ).group_by(Membership.organization_id).all())
+    active_subs = set(r[0] for r in db.session.query(
+        Subscription.organization_id
+    ).filter(Subscription.status.in_(['ACTIVE', 'TRIAL'])).all())
+    return jsonify(items=[{
+        'id': o.id,
+        'name': o.name,
+        'status': o.status,
+        'members': counts.get(o.id, 0),
+        'subscription_active': o.id in active_subs,
+        'created_at': o.created_at
+    } for o in orgs])
 
 @admin_bp.post('/organizations')
 @platform_admin
@@ -39,7 +72,13 @@ def create_org():
 
 @admin_bp.get('/users')
 @platform_admin
-def users(): return jsonify(items=[row_user(u) for u in User.query.order_by(User.created_at.desc()).all()])
+def users():
+    user_list = User.query.order_by(User.created_at.desc()).all()
+    if not user_list:
+        return jsonify(items=[])
+    memberships = Membership.query.all()
+    m_by_user = {m.user_id: m for m in memberships}
+    return jsonify(items=[row_user(u, m_by_user.get(u.id)) for u in user_list])
 
 @admin_bp.post('/users')
 @platform_admin
@@ -50,7 +89,7 @@ def create_user():
     if not org_id or not Organization.query.get(org_id): return jsonify(error='organization_not_found',message='Organization not found'),404
     try: ph=hash_password(password)
     except Exception as e: return jsonify(error='invalid_password',message=str(e)),400
-    u=User(email=email,password_hash=ph); db.session.add(u); db.session.flush(); db.session.add(Membership(user_id=u.id,organization_id=org_id,role=role)); audit(actor_id=g.principal['user'].id,organization_id=org_id,action='USER_CREATED',resource='user',resource_id=u.id); db.session.commit(); return jsonify(row_user(u)),201
+    u=User(email=email,password_hash=ph); db.session.add(u); db.session.flush(); m=Membership(user_id=u.id,organization_id=org_id,role=role); db.session.add(m); audit(actor_id=g.principal['user'].id,organization_id=org_id,action='USER_CREATED',resource='user',resource_id=u.id); db.session.commit(); return jsonify(row_user(u, m)),201
 
 @admin_bp.patch('/users/<user_id>/status')
 @platform_admin
@@ -61,12 +100,30 @@ def status(user_id):
     if not u: return jsonify(error='not_found',message='User not found'),404
     if u.id==g.principal['user'].id and new!='ACTIVE': return jsonify(error='self_lockout',message='You cannot disable your current platform-admin session'),400
     u.status=new
+    invalidate_auth_cache(user_id=u.id)
     if new in {'SUSPENDED','FROZEN','DISABLED','LOCKED'}: Session.query.filter_by(user_id=u.id,revoked=False).update({'revoked':True})
-    audit(actor_id=g.principal['user'].id,action='USER_STATUS_CHANGED',resource='user',resource_id=u.id,reason=new); security_event('HIGH' if new!='ACTIVE' else 'INFO','USER_STATUS_CHANGED',u.id,details={'status':new}); db.session.commit(); return jsonify(row_user(u))
+    audit(actor_id=g.principal['user'].id,action='USER_STATUS_CHANGED',resource='user',resource_id=u.id,reason=new); security_event('HIGH' if new!='ACTIVE' else 'INFO','USER_STATUS_CHANGED',u.id,details={'status':new}); db.session.commit(); m=Membership.query.filter_by(user_id=u.id).first(); return jsonify(row_user(u, m))
 
 @admin_bp.get('/applications')
 @platform_admin
-def applications(): return jsonify(items=[{'id':a.id,'name':a.name,'application_key_last4':a.application_key_last4,'status':a.status,'capabilities':a.capabilities,'allowed_origins':a.allowed_origins,'permissions':Permission.query.filter_by(application_id=a.id).count(),'created_at':a.created_at} for a in Application.query.order_by(Application.created_at.desc()).all()])
+def applications():
+    apps = Application.query.order_by(Application.created_at.desc()).all()
+    if not apps:
+        return jsonify(items=[])
+    perm_counts = dict(db.session.query(
+        Permission.application_id, func.count(Permission.id)
+    ).group_by(Permission.application_id).all())
+    return jsonify(items=[{
+        'id': a.id,
+        'name': a.name,
+        'application_key_last4': a.application_key_last4,
+        'status': a.status,
+        'capabilities': a.capabilities,
+        'allowed_origins': a.allowed_origins,
+        'owner_emails': a.owner_emails or [],
+        'permissions': perm_counts.get(a.id, 0),
+        'created_at': a.created_at
+    } for a in apps])
 
 @admin_bp.post('/applications')
 @platform_admin
@@ -77,7 +134,56 @@ def create_application():
     existing = Application.query.filter(func.lower(Application.name) == func.lower(name)).first()
     if existing:
         return jsonify(error='duplicate_application_name', message=f"An application named '{name}' already exists. Duplicate application names are not permitted."), 409
-    secret='uecp_'+token_urlsafe(32); a=Application(name=name,application_key_hash=sha256(secret.encode()).hexdigest(),application_key_last4=secret[-4:],capabilities=data.get('capabilities') or {},allowed_origins=data.get('allowed_origins') or [],owner_emails=data.get('owner_emails') or []); db.session.add(a); db.session.flush(); audit(actor_id=g.principal['user'].id,action='APPLICATION_REGISTERED',resource='application',resource_id=a.id); db.session.commit(); return jsonify(id=a.id,name=a.name,application_key=secret,warning='Store this application key securely. It cannot be recovered after creation.'),201
+    
+    owner_emails = data.get('owner_emails') or []
+    if isinstance(owner_emails, str):
+        owner_emails = [e.strip().lower() for e in owner_emails.split(',') if e.strip()]
+    client_email = str(data.get('client_email', '')).strip().lower()
+    if client_email and client_email not in owner_emails:
+        owner_emails.append(client_email)
+
+    secret='uecp_'+token_urlsafe(32)
+    a=Application(
+        name=name,
+        application_key_hash=sha256(secret.encode()).hexdigest(),
+        application_key_last4=secret[-4:],
+        capabilities=data.get('capabilities') or {},
+        allowed_origins=data.get('allowed_origins') or [],
+        owner_emails=owner_emails
+    )
+    db.session.add(a)
+    db.session.flush()
+    audit(actor_id=g.principal['user'].id,action='APPLICATION_REGISTERED',resource='application',resource_id=a.id)
+    db.session.commit()
+    return jsonify(id=a.id,name=a.name,owner_emails=a.owner_emails or [],application_key=secret,warning='Store this application key securely. It cannot be recovered after creation.'),201
+
+@admin_bp.patch('/applications/<app_id>')
+@platform_admin
+def update_application(app_id):
+    app = Application.query.get(app_id)
+    if not app:
+        return jsonify(error='not_found', message='Application not found'), 404
+    data = request.get_json(silent=True) or {}
+    if 'name' in data:
+        new_name = str(data['name']).strip()
+        if new_name:
+            app.name = new_name
+    if 'owner_emails' in data:
+        raw = data['owner_emails']
+        if isinstance(raw, str):
+            emails = [e.strip().lower() for e in raw.split(',') if e.strip()]
+        elif isinstance(raw, list):
+            emails = [str(e).strip().lower() for e in raw if str(e).strip()]
+        else:
+            emails = []
+        app.owner_emails = emails
+    elif 'client_email' in data:
+        ce = str(data['client_email']).strip().lower()
+        app.owner_emails = [ce] if ce else []
+    audit(actor_id=g.principal['user'].id, action='APPLICATION_UPDATED', resource='application', resource_id=app.id)
+    db.session.commit()
+    return jsonify(id=app.id, name=app.name, owner_emails=app.owner_emails or [], status=app.status)
+
 
 @admin_bp.post('/applications/<app_id>/webhook')
 @platform_admin
@@ -187,4 +293,4 @@ def security_events():
 def revoke_session(session_id):
     s=Session.query.get(session_id)
     if not s: return jsonify(error='not_found',message='Session not found'),404
-    s.revoked=True; audit(actor_id=g.principal['user'].id,organization_id=s.organization_id,action='SESSION_REVOKED',resource='session',resource_id=s.id); db.session.commit(); return jsonify(ok=True)
+    s.revoked=True; invalidate_auth_cache(session_id=session_id); audit(actor_id=g.principal['user'].id,organization_id=s.organization_id,action='SESSION_REVOKED',resource='session',resource_id=s.id); db.session.commit(); return jsonify(ok=True)

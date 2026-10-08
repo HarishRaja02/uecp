@@ -47,18 +47,26 @@ def _credential_graph(credential):
     return list(reversed(ancestors)), None
 
 
-def effective_status(credential, now=None):
+def effective_status(credential, now=None, context=None):
     now = now or _now()
-    application = Application.query.get(credential.application_id)
+    if context:
+        application = context.get('apps', {}).get(credential.application_id)
+        organization = context.get('orgs', {}).get(credential.organization_id)
+        is_sub_active = credential.organization_id in context.get('active_subs', set())
+        grant = context.get('grants', {}).get(credential.access_grant_id)
+    else:
+        application = Application.query.get(credential.application_id)
+        organization = Organization.query.get(credential.organization_id)
+        from app.services.authorization import subscription_active
+        is_sub_active = subscription_active(credential.organization_id)
+        grant = AccessGrant.query.get(credential.access_grant_id)
+
     if not application or application.status != 'ACTIVE':
         return {'allowed': False, 'status': 'FROZEN', 'reason': 'application_inactive', 'credential_id': credential.id}
-    organization = Organization.query.get(credential.organization_id)
     if not organization or organization.status != 'ACTIVE':
         return {'allowed': False, 'status': 'FROZEN', 'reason': 'organization_inactive', 'credential_id': credential.id}
-    from app.services.authorization import subscription_active
-    if not subscription_active(credential.organization_id):
+    if not is_sub_active:
         return {'allowed': False, 'status': 'FROZEN', 'reason': 'subscription_expired_or_inactive', 'credential_id': credential.id}
-    grant = AccessGrant.query.get(credential.access_grant_id)
     if not grant:
         return {'allowed': False, 'status': 'FROZEN', 'reason': 'access_grant_missing', 'credential_id': credential.id}
     if grant.status in {'FROZEN', 'REVOKED', 'SUSPENDED', 'CANCELLED'}:

@@ -31,6 +31,8 @@ import {
   SlidersHorizontal,
   Boxes,
   CreditCard,
+  Mail,
+  Edit3,
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import Table from '../components/Table';
@@ -97,21 +99,26 @@ function CopyButton({ text, label = 'Copy' }) {
 }
 
 export function TabPurposeCard({ icon: Icon, title, reason, impact }) {
+  const cleanTitle = title ? title.replace(/^Why this exists:\s*/i, '') : '';
   return (
     <div className="purpose-card">
       <div className="purpose-icon-box">
-        <Icon size={20} />
+        <Icon size={19} />
       </div>
       <div className="purpose-content">
         <div className="purpose-header">
-          <b>{title}</b>
+          <div className="purpose-title-group">
+            <span className="purpose-label">ARCHITECTURE PURPOSE</span>
+            <h3 className="purpose-title">{cleanTitle}</h3>
+          </div>
           <span className="purpose-tag">CONTROL PLANE CORE</span>
         </div>
         <p className="purpose-reason">{reason}</p>
         {impact && (
-          <p className="purpose-impact">
-            <strong>System Impact:</strong> {impact}
-          </p>
+          <div className="purpose-impact">
+            <span className="impact-badge">SYSTEM IMPACT</span>
+            <span className="impact-text">{impact}</span>
+          </div>
         )}
       </div>
     </div>
@@ -130,7 +137,33 @@ export function Credentials() {
   const [showProvision, setShowProvision] = useState(false);
   const [secrets, setSecrets] = useState(null);
   const [actionModal, setActionModal] = useState(null);
+  const [extendDate, setExtendDate] = useState('');
+  const [extendTime, setExtendTime] = useState('');
+  const [manualEmail, setManualEmail] = useState('');
+  const [sendingEmail, setSendingEmail] = useState(false);
   const toast = useToast();
+
+  const openAction = (cred, action) => {
+    setActionModal({ ...cred, action });
+    if (action === 'extend') {
+      const defaultDate = cred.expires_at
+        ? new Date(cred.expires_at).toISOString().split('T')[0]
+        : new Date(Date.now() + 180 * 86400000).toISOString().split('T')[0];
+      setExtendDate(defaultDate);
+
+      // Default timer to the exact time access was activated (created_at or expires_at), editable by user
+      let defaultTime = '12:00';
+      if (cred.created_at) {
+        const cd = new Date(cred.created_at);
+        defaultTime = `${String(cd.getUTCHours()).padStart(2, '0')}:${String(cd.getUTCMinutes()).padStart(2, '0')}`;
+      } else if (cred.expires_at) {
+        const ed = new Date(cred.expires_at);
+        defaultTime = `${String(ed.getUTCHours()).padStart(2, '0')}:${String(ed.getUTCMinutes()).padStart(2, '0')}`;
+      }
+      setExtendTime(defaultTime);
+      setManualEmail(cred.owner_emails?.[0] || '');
+    }
+  };
 
   const handleAction = async (e) => {
     e.preventDefault();
@@ -141,12 +174,12 @@ export function Credentials() {
     const payload = { action, reason };
 
     if (action === 'extend') {
-      const expiresAt = form.get('expires_at');
-      if (!expiresAt) {
+      if (!extendDate) {
         toast.error('Expiration date is required');
         return;
       }
-      payload.expires_at = `${expiresAt}T23:59:59Z`;
+      const timeVal = extendTime || '00:00';
+      payload.expires_at = `${extendDate}T${timeVal}:00Z`;
     }
 
     try {
@@ -162,10 +195,32 @@ export function Credentials() {
     }
   };
 
+  const handleSendManualEmail = async () => {
+    if (!actionModal?.id) return;
+    const email = manualEmail.trim();
+    if (!email) {
+      toast.error('Please enter a recipient client email');
+      return;
+    }
+    setSendingEmail(true);
+    try {
+      const res = await api(`/admin/credentials/${actionModal.id}/send-reminder`, {
+        method: 'POST',
+        body: JSON.stringify({ recipient: email }),
+      });
+      toast.success(res.message || `Reminder email sent to ${email}`);
+    } catch (err) {
+      toast.error(err.message || 'Failed to send reminder email');
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
   const handleProvision = async (e) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     const expiresAt = form.get('expires_at');
+    const clientEmail = form.get('client_email')?.trim() || '';
 
     try {
       const result = await api('/admin/access-grants', {
@@ -174,6 +229,7 @@ export function Credentials() {
           organization_id: form.get('organization_id'),
           application_id: form.get('application_id'),
           plan_id: form.get('plan_id'),
+          client_email: clientEmail,
           expires_at: `${expiresAt}T23:59:59Z`,
           grace_days: Number(form.get('grace_days') || 0),
           permissions: ['*', 'ai.chat', 'documents.read', 'documents.write', 'email.read', 'reports.download'],
@@ -303,9 +359,7 @@ export function Credentials() {
                     all={g.credentials}
                     expanded={expanded}
                     toggle={toggle}
-                    onAction={(cred, action) =>
-                      setActionModal({ id: cred.id, name: cred.name, action })
-                    }
+                    onAction={openAction}
                   />
                 ))}
             </div>
@@ -362,6 +416,14 @@ export function Credentials() {
                   </option>
                 ))}
               </select>
+            </label>
+            <label>
+              Client Contact Email <span className="text-muted">(Optional — can skip)</span>
+              <input
+                name="client_email"
+                type="email"
+                placeholder="e.g. client@company.com"
+              />
             </label>
             <div className="form-row-2">
               <label>
@@ -427,17 +489,115 @@ export function Credentials() {
             </div>
 
             {actionModal.action === 'extend' && (
-              <label>
-                New Expiration Date
-                <input
-                  name="expires_at"
-                  type="date"
-                  required
-                  defaultValue={
-                    new Date(Date.now() + 180 * 86400000).toISOString().split('T')[0]
-                  }
-                />
-              </label>
+              <>
+                <div className="extend-timer-box">
+                  <div className="extend-timer-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Clock size={16} className="text-primary" />
+                      <span>Expiration Date & Activation Timer</span>
+                    </div>
+                    {actionModal.created_at && (
+                      <span className="activation-badge" title="Original activation timestamp">
+                        Activated: {new Date(actionModal.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="preset-buttons">
+                    <span className="preset-label">Quick Presets:</span>
+                    <button
+                      type="button"
+                      className={`preset-btn ${extendDate === new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0] ? 'active' : ''}`}
+                      onClick={() => setExtendDate(new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0])}
+                    >
+                      +30 Days
+                    </button>
+                    <button
+                      type="button"
+                      className={`preset-btn ${extendDate === new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0] ? 'active' : ''}`}
+                      onClick={() => setExtendDate(new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0])}
+                    >
+                      +90 Days
+                    </button>
+                    <button
+                      type="button"
+                      className={`preset-btn ${extendDate === new Date(Date.now() + 180 * 86400000).toISOString().split('T')[0] ? 'active' : ''}`}
+                      onClick={() => setExtendDate(new Date(Date.now() + 180 * 86400000).toISOString().split('T')[0])}
+                    >
+                      +180 Days
+                    </button>
+                    <button
+                      type="button"
+                      className={`preset-btn ${extendDate === new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0] ? 'active' : ''}`}
+                      onClick={() => setExtendDate(new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0])}
+                    >
+                      +1 Year
+                    </button>
+                  </div>
+
+                  <div className="form-row-2">
+                    <label>
+                      New Expiration Date
+                      <input
+                        name="expires_at"
+                        type="date"
+                        required
+                        value={extendDate}
+                        onChange={(e) => setExtendDate(e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Expiration Time (UTC)
+                      <input
+                        name="expires_time"
+                        type="time"
+                        required
+                        value={extendTime}
+                        onChange={(e) => setExtendTime(e.target.value)}
+                        title="Defaults to original activation time, but can be changed freely"
+                      />
+                    </label>
+                  </div>
+                  <div className="timer-hint">
+                    ⏱ Expiration time defaults to when access was activated ({extendTime || '12:00'} UTC). You can modify both date and time.
+                  </div>
+                </div>
+
+                {/* Manual Expiration Email Card */}
+                <div className="extend-email-card">
+                  <div className="extend-email-header">
+                    <Mail size={16} className="text-primary" style={{ marginTop: '2px' }} />
+                    <div>
+                      <strong>Send Expiration Reminder Email</strong>
+                      <div className="extend-email-sub">
+                        Dispatches notification to client with expiration details and support contact reach-out email to reactivate subscription.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="extend-email-form">
+                    <label>
+                      Client Notification Email
+                      <input
+                        type="email"
+                        value={manualEmail}
+                        onChange={(e) => setManualEmail(e.target.value)}
+                        placeholder="client@example.com"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="send-email-btn"
+                      disabled={sendingEmail || !manualEmail}
+                      onClick={handleSendManualEmail}
+                      title="Send expiration reminder email immediately"
+                    >
+                      <Send size={13} className={sendingEmail ? 'spin' : ''} />
+                      <span>{sendingEmail ? 'Sending Email...' : 'Send Email Manually'}</span>
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
 
             <label>
@@ -538,6 +698,12 @@ function CredentialNode({ credential, all, expanded, toggle, onAction }) {
             <div className="cred-name-line">
               <b>{credential.name}</b>
               <span className="kind-badge">{credential.kind}</span>
+              {credential.owner_emails?.[0] && (
+                <span className="cred-email-tag" title={`Client: ${credential.owner_emails[0]}`}>
+                  <Mail size={11} />
+                  <span>{credential.owner_emails[0]}</span>
+                </span>
+              )}
             </div>
             <div className="cred-id-sub">
               <code>{credential.id}</code>
@@ -636,7 +802,9 @@ export function Applications() {
   const [modal, setModal] = useState(false);
   const [permModal, setPermModal] = useState(null);
   const [configModal, setConfigModal] = useState(null);
+  const [editAppModal, setEditAppModal] = useState(null);
   const [name, setName] = useState('');
+  const [clientEmail, setClientEmail] = useState('');
   const [newKeyResult, setNewKeyResult] = useState(null);
   const toast = useToast();
 
@@ -649,17 +817,44 @@ export function Applications() {
       return;
     }
     try {
+      const payload = { name: cleanName };
+      if (clientEmail.trim()) {
+        payload.client_email = clientEmail.trim();
+      }
       const result = await api('/admin/applications', {
         method: 'POST',
-        body: JSON.stringify({ name: cleanName }),
+        body: JSON.stringify(payload),
       });
       setModal(false);
       setName('');
+      setClientEmail('');
       setNewKeyResult(result);
       toast.success('Application registered successfully');
       reload();
     } catch (err) {
       toast.error(err.message || 'Failed to create application');
+    }
+  };
+
+  const handleUpdateApp = async (e) => {
+    e.preventDefault();
+    if (!editAppModal) return;
+    const form = new FormData(e.currentTarget);
+    const updatedName = form.get('name')?.trim();
+    const updatedEmail = form.get('client_email')?.trim();
+    try {
+      await api(`/admin/applications/${editAppModal.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: updatedName,
+          client_email: updatedEmail,
+        }),
+      });
+      toast.success('Application updated successfully');
+      setEditAppModal(null);
+      reload();
+    } catch (err) {
+      toast.error(err.message || 'Failed to update application');
     }
   };
 
@@ -756,6 +951,21 @@ export function Applications() {
             ),
           },
           {
+            key: 'client_email',
+            label: 'Client Email',
+            render: (r) => {
+              const email = r.owner_emails?.[0];
+              return email ? (
+                <div className="client-email-badge">
+                  <Mail size={12} className="text-primary" />
+                  <span>{email}</span>
+                </div>
+              ) : (
+                <span className="badge-muted">Not configured</span>
+              );
+            },
+          },
+          {
             key: 'setup',
             label: 'Client Setup',
             render: (r) => (
@@ -773,6 +983,20 @@ export function Applications() {
             key: 'created_at',
             label: 'Created',
             render: (r) => new Date(r.created_at).toLocaleDateString(),
+          },
+          {
+            key: 'actions',
+            label: 'Actions',
+            render: (r) => (
+              <button
+                className="secondary small"
+                onClick={() => setEditAppModal(r)}
+                title="Edit client email and details"
+              >
+                <Edit3 size={13} />
+                <span>Edit</span>
+              </button>
+            ),
           },
         ]}
         rows={data}
@@ -826,14 +1050,64 @@ UECP_ALLOW_INSECURE_HTTP=true`}</pre>
                 autoFocus
               />
             </label>
+            <label>
+              Client Email <span className="text-muted">(Optional — can be skipped)</span>
+              <input
+                type="email"
+                value={clientEmail}
+                onChange={(e) => setClientEmail(e.target.value)}
+                placeholder="e.g. client@example.com"
+              />
+            </label>
             <p className="hint">
-              UECP will generate a cryptographic application secret that will be shown once upon creation.
+              The client email will receive automated expiration reminder alerts with reach-out contact instructions to renew subscriptions before access cuts off. You can edit or add it anytime later.
             </p>
             <div className="modal-actions">
               <button type="button" className="secondary" onClick={() => setModal(false)}>
                 Cancel
               </button>
               <button className="primary">Create Application</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Edit App / Client Email Modal */}
+      {editAppModal && (
+        <Modal
+          title={`Edit Client Application: ${editAppModal.name}`}
+          onClose={() => setEditAppModal(null)}
+        >
+          <form onSubmit={handleUpdateApp} className="modal-form">
+            <label>
+              Application Name
+              <input
+                name="name"
+                defaultValue={editAppModal.name}
+                required
+              />
+            </label>
+            <label>
+              Client Email <span className="text-muted">(Used for expiration reminders)</span>
+              <input
+                name="client_email"
+                type="email"
+                defaultValue={editAppModal.owner_emails?.[0] || ''}
+                placeholder="client@example.com"
+              />
+            </label>
+            <p className="hint">
+              Update the client notification email for this application. Expiration notices and subscription renewal instructions will be sent to this email address.
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setEditAppModal(null)}
+              >
+                Cancel
+              </button>
+              <button className="primary">Save Changes</button>
             </div>
           </form>
         </Modal>
@@ -1409,14 +1683,22 @@ export function Integrations() {
               className={`cred-tab-btn ${selectedCredIndex === idx ? 'active' : ''}`}
               onClick={() => setSelectedCredIndex(idx)}
             >
-              <b>{idx + 1}. {c.name}</b>
-              <small>{c.role}</small>
+              <div className="cred-tab-header">
+                <span className="cred-tab-num">{idx + 1}</span>
+                <b>{c.name}</b>
+              </div>
+              <small className="cred-tab-role">{c.role}</small>
             </button>
           ))}
         </div>
 
-        <div className="code-box">
-          <pre>{`# Universal Enterprise Control Plane (UECP) Integration
+        <div className="code-box-card">
+          <div className="code-box-header">
+            <span className="code-box-title">ENVIRONMENT VARIABLES (.env)</span>
+            <span className="code-box-active-pill">{currentCred.name}</span>
+          </div>
+          <div className="code-box">
+            <pre>{`# Universal Enterprise Control Plane (UECP) Integration
 # Credential Selected: ${currentCred.name} (${currentCred.role})
 UECP_ENABLED=true
 UECP_BASE_URL=${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8001'}
@@ -1427,6 +1709,7 @@ UECP_CREDENTIAL_SECRET=${currentCred.secret}
 UECP_VALIDATION_TIMEOUT_SECONDS=5
 UECP_CACHE_TTL_SECONDS=60
 UECP_ALLOW_INSECURE_HTTP=true`}</pre>
+          </div>
         </div>
 
         <div className="config-actions">

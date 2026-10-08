@@ -63,9 +63,16 @@ export default function App() {
   const [section, setSection] = useState('Overview');
 
   useEffect(() => {
+    const hasPreviousSession = typeof window !== 'undefined' && localStorage.getItem('uecp_logged_in') === '1';
+    if (!hasPreviousSession) {
+      setReady(true);
+      return;
+    }
     refresh()
       .then(() => setLogged(true))
-      .catch(() => {})
+      .catch(() => {
+        setLogged(false);
+      })
       .finally(() => setReady(true));
   }, []);
 
