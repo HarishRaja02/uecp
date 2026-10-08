@@ -23,11 +23,11 @@ def create_app(test_config=None):
         engine_options['poolclass'] = NullPool
 
     if 'postgres' in db_url:
-        engine_options['connect_args'] = {'connect_timeout': 3}
+        engine_options['connect_args'] = {'connect_timeout': 10}
         if os.getenv('VERCEL'):
             try:
                 from sqlalchemy import create_engine, text
-                test_engine = create_engine(db_url, poolclass=NullPool, connect_args={'connect_timeout': 3})
+                test_engine = create_engine(db_url, poolclass=NullPool, connect_args={'connect_timeout': 10})
                 with test_engine.connect() as conn:
                     conn.execute(text("SELECT 1"))
                 test_engine.dispose()

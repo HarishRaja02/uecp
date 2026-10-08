@@ -20,6 +20,25 @@ def resolve_database_url():
         if os.getenv('VERCEL'):
             return "sqlite:////tmp/uecp.db"
         return f"sqlite:///{(PROJECT_ROOT / 'uecp.db').resolve()}"
+
+    # Auto-encode password and map IPv6-only Supabase direct host to IPv4-ready connection pooler
+    if '://' in raw and '@' in raw:
+        import urllib.parse
+        import re
+        scheme, rest = raw.split('://', 1)
+        if scheme in ('postgres', 'postgresql', 'postgresql+psycopg'):
+            creds, host_part = rest.rsplit('@', 1)
+            if ':' in creds:
+                u, p = creds.split(':', 1)
+                p_encoded = urllib.parse.quote_plus(urllib.parse.unquote(p))
+                m = re.match(r'^db\.([a-z0-9]+)\.supabase\.co(?::(\d+))?(.*)$', host_part)
+                if m:
+                    ref, port, rest_path = m.group(1), m.group(2), m.group(3)
+                    if not u.endswith(f'.{ref}'):
+                        u = f'{u}.{ref}'
+                    host_part = f'aws-0-ap-southeast-2.pooler.supabase.com:5432{rest_path}'
+                raw = f"{scheme}://{u}:{p_encoded}@{host_part}"
+
     if raw.startswith('postgres://'):
         raw = 'postgresql+psycopg://' + raw[len('postgres://'):]
     elif raw.startswith('postgresql://'):
@@ -28,18 +47,7 @@ def resolve_database_url():
         if 'sslmode=' not in raw:
             sep = '&' if '?' in raw else '?'
             raw = f"{raw}{sep}sslmode=require"
-        if 'hostaddr=' not in raw:
-            try:
-                import urllib.parse
-                import socket
-                parsed = urllib.parse.urlparse(raw)
-                if parsed.hostname and not parsed.hostname.replace('.', '').isdigit():
-                    ip = socket.gethostbyname(parsed.hostname)
-                    if ip:
-                        sep = '&' if '?' in raw else '?'
-                        raw = f"{raw}{sep}hostaddr={ip}"
-            except Exception:
-                pass
+
     if raw.startswith('sqlite:///./'):
         rel = raw[len('sqlite:///./'):]
         if os.getenv('VERCEL'):
