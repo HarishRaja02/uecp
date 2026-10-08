@@ -29,6 +29,8 @@ import {
   Zap,
   Clock,
   SlidersHorizontal,
+  Boxes,
+  CreditCard,
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import Table from '../components/Table';
