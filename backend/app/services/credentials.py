@@ -30,8 +30,11 @@ def _expiry_state(expires_at, grace_days=0, now=None):
     return 'FROZEN', 'expired'
 
 
-def _credential_graph(credential):
-    rows = Credential.query.filter_by(access_grant_id=credential.access_grant_id).all()
+def _credential_graph(credential, context=None):
+    if context and 'creds_by_grant' in context:
+        rows = context['creds_by_grant'].get(credential.access_grant_id, [])
+    else:
+        rows = Credential.query.filter_by(access_grant_id=credential.access_grant_id).all()
     by_id = {row.id: row for row in rows}
     ancestors = []
     current = credential
@@ -74,7 +77,7 @@ def effective_status(credential, now=None, context=None):
     grant_state, grant_reason = _expiry_state(grant.expires_at, grant.grace_days, now)
     if grant_state == 'FROZEN':
         return {'allowed': False, 'status': grant_state, 'reason': grant_reason, 'credential_id': credential.id}
-    ancestors, graph_error = _credential_graph(credential)
+    ancestors, graph_error = _credential_graph(credential, context=context)
     if graph_error:
         return {'allowed': False, 'status': 'FROZEN', 'reason': graph_error, 'credential_id': credential.id}
     for ancestor in ancestors:

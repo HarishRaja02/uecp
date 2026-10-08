@@ -38,18 +38,29 @@ def _get_ephemeral_keys():
         ).decode('utf-8')
     return _ephemeral_priv, _ephemeral_pub
 
+_KEY_CACHE = {}
+
 def load_key(path, env_var=None):
+    cache_key = (str(path), env_var)
+    if cache_key in _KEY_CACHE:
+        return _KEY_CACHE[cache_key]
     import os
     if env_var:
         val = os.getenv(env_var)
         if val:
-            return val.replace('\\n', '\n')
+            k = val.replace('\\n', '\n')
+            _KEY_CACHE[cache_key] = k
+            return k
     p = Path(path)
     if p.exists():
-        return p.read_text(encoding='utf-8')
+        k = p.read_text(encoding='utf-8')
+        _KEY_CACHE[cache_key] = k
+        return k
     priv, pub = _get_ephemeral_keys()
     if (env_var and 'PRIVATE' in env_var) or 'private' in str(path).lower():
+        _KEY_CACHE[cache_key] = priv
         return priv
+    _KEY_CACHE[cache_key] = pub
     return pub
 
 def create_access_token(subject, tenant_id, roles, session_id):

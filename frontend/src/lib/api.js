@@ -14,6 +14,19 @@ export function clearApiCache() {
   apiCache.clear();
 }
 
+export function getCached(path, maxAge = 60000) {
+  const cached = apiCache.get(path);
+  if (cached && Date.now() - cached.timestamp < maxAge) {
+    return cached.data;
+  }
+  return null;
+}
+
+export function prefetch(path) {
+  if (apiCache.has(path)) return;
+  api(path).catch(() => {});
+}
+
 async function refreshAccessToken() {
   if (!refreshPromise) {
     refreshPromise = fetch(BASE + '/auth/refresh', { method: 'POST', credentials: 'include' })
@@ -45,7 +58,7 @@ export async function api(path, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const isGet = method === 'GET';
   const cacheKey = path;
-  const ttl = options.ttl ?? 15000; // 15 seconds cache by default for GET
+  const ttl = options.ttl ?? 60000; // 60 seconds cache by default for GET
 
   // Mutation automatically busts GET cache
   if (!isGet) {

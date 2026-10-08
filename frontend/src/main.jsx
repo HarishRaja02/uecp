@@ -1,6 +1,6 @@
 import { Component, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { refresh, logout } from './lib/api';
+import { refresh, logout, prefetch } from './lib/api';
 import Layout from './components/Layout';
 import { ToastProvider } from './components/Toast';
 import Login from './pages/Login';
@@ -75,6 +75,24 @@ export default function App() {
       })
       .finally(() => setReady(true));
   }, []);
+
+  useEffect(() => {
+    if (logged) {
+      // Warm up background cache for all dashboard sections for instantaneous 0ms page loads
+      const timer = setTimeout(() => {
+        prefetch('/admin/overview');
+        prefetch('/admin/audit?limit=6');
+        prefetch('/admin/applications');
+        prefetch('/admin/organizations');
+        prefetch('/admin/users');
+        prefetch('/admin/subscriptions');
+        prefetch('/admin/access-grants');
+        prefetch('/admin/plans');
+        prefetch('/admin/security-events');
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [logged]);
 
   if (!ready) {
     return (

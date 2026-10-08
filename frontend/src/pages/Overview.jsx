@@ -16,7 +16,7 @@ import {
   Sparkles,
   Zap,
 } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, getCached } from '../lib/api';
 import { useToast } from '../components/Toast';
 
 export function PageTitle({ title, text, action }) {
@@ -33,13 +33,17 @@ export function PageTitle({ title, text, action }) {
 }
 
 export default function Overview() {
-  const [data, setData] = useState(null);
-  const [recentAudit, setRecentAudit] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedOverview = getCached('/admin/overview');
+  const cachedAudit = getCached('/admin/audit?limit=6');
+  const [data, setData] = useState(() => cachedOverview || null);
+  const [recentAudit, setRecentAudit] = useState(() => cachedAudit?.items || []);
+  const [loading, setLoading] = useState(() => !cachedOverview);
   const toast = useToast();
 
   const loadData = (forceFresh = false) => {
-    setLoading(true);
+    if (!cachedOverview || forceFresh) {
+      setLoading(true);
+    }
     Promise.all([
       api('/admin/overview', { fresh: forceFresh }).catch(() => null),
       api('/admin/audit?limit=6', { fresh: forceFresh }).catch(() => ({ items: [] })),

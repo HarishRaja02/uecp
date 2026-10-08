@@ -19,11 +19,15 @@ def row_user(u, membership=None):
     m = membership
     return {'id':u.id,'email':u.email,'status':u.status,'role':m.role if m else None,'organization_id':m.organization_id if m else None,'mfa_enabled':u.mfa_enabled,'is_platform_admin':u.is_platform_admin,'created_at':u.created_at}
 
+_OVERVIEW_CACHE = {'time': 0, 'data': None}
+
 @admin_bp.get('/overview')
 @platform_admin
 def overview():
     import time
-    t0 = time.time()
+    now = time.time()
+    if _OVERVIEW_CACHE['data'] and (now - _OVERVIEW_CACHE['time'] < 10.0):
+        return jsonify(_OVERVIEW_CACHE['data'])
     row = db.session.execute(text("""
         SELECT
             (SELECT count(*) FROM users) as users,
@@ -36,9 +40,10 @@ def overview():
             (SELECT count(*) FROM security_events WHERE resolved = false) as security_alerts,
             (SELECT count(*) FROM audit_events) as audit_events
     """)).mappings().first()
-    t_query = time.time() - t0
-    print(f">>> [OVERVIEW] Query took: {t_query:.3f}s")
-    return jsonify(dict(row) if row else {})
+    data = dict(row) if row else {}
+    _OVERVIEW_CACHE['time'] = now
+    _OVERVIEW_CACHE['data'] = data
+    return jsonify(data)
 
 @admin_bp.get('/organizations')
 @platform_admin
@@ -254,10 +259,35 @@ def add_permission(app_id):
 @admin_bp.get('/subscriptions')
 @platform_admin
 def subscriptions():
-    rows=[]
-    for s in Subscription.query.order_by(Subscription.starts_at.desc()).all():
-        o=Organization.query.get(s.organization_id); p=Plan.query.get(s.plan_id)
-        rows.append({'id':s.id,'organization':o.name if o else None,'organization_id':s.organization_id,'plan':p.code if p else None,'status':s.status,'expires_at':s.expires_at,'active':subscription_active(s.organization_id)})
+    subs = Subscription.query.order_by(Subscription.starts_at.desc()).all()
+    if not subs:
+        return jsonify(items=[])
+    org_ids = {s.organization_id for s in subs if s.organization_id}
+    plan_ids = {s.plan_id for s in subs if s.plan_id}
+    org_names = {o.id: o.name for o in Organization.query.filter(Organization.id.in_(org_ids)).all()} if org_ids else {}
+    plan_codes = {p.id: p.code for p in Plan.query.filter(Plan.id.in_(plan_ids)).all()} if plan_ids else {}
+
+    from datetime import datetime, timezone
+    from app.core.time import as_utc
+    now = datetime.now(timezone.utc)
+    org_latest_sub = {}
+    for s in subs:
+        if s.organization_id not in org_latest_sub:
+            is_act = (
+                s.status not in {'SUSPENDED', 'EXPIRED', 'CANCELLED', 'PAST_DUE'}
+                and (not s.expires_at or as_utc(s.expires_at) >= now or (s.override_until and as_utc(s.override_until) > now))
+            )
+            org_latest_sub[s.organization_id] = is_act
+
+    rows = [{
+        'id': s.id,
+        'organization': org_names.get(s.organization_id),
+        'organization_id': s.organization_id,
+        'plan': plan_codes.get(s.plan_id),
+        'status': s.status,
+        'expires_at': s.expires_at,
+        'active': org_latest_sub.get(s.organization_id, False),
+    } for s in subs]
     return jsonify(items=rows)
 
 @admin_bp.get('/plans')

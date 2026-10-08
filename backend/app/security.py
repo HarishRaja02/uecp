@@ -21,6 +21,24 @@ def invalidate_auth_cache(user_id=None, session_id=None):
     for k in to_delete:
         _PRINCIPAL_CACHE.pop(k, None)
 
+class CachedUser:
+    __slots__ = ('id', 'email', 'status', 'is_platform_admin', 'mfa_enabled', 'created_at')
+    def __init__(self, id, email, status, is_platform_admin, mfa_enabled=False, created_at=None):
+        self.id = id
+        self.email = email
+        self.status = status
+        self.is_platform_admin = bool(is_platform_admin)
+        self.mfa_enabled = bool(mfa_enabled)
+        self.created_at = created_at
+
+class CachedSession:
+    __slots__ = ('id', 'user_id', 'revoked', 'expires_at')
+    def __init__(self, id, user_id, revoked, expires_at):
+        self.id = id
+        self.user_id = user_id
+        self.revoked = bool(revoked)
+        self.expires_at = expires_at
+
 def auth_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -32,7 +50,6 @@ def auth_required(fn):
         except SecurityError:
             return jsonify(error='unauthorized', message='Invalid or expired token'), 401
 
-        t_auth0 = time.time()
         sub = claims.get('sub')
         sid = claims.get('sid')
         cache_key = f"{sub}:{sid}"
@@ -42,21 +59,36 @@ def auth_required(fn):
         if cached and (now - cached['time'] < _CACHE_TTL):
             user = cached['user']
             session = cached['session']
-            print(f">>> [AUTH] Cache HIT in {time.time()-t_auth0:.4f}s")
         else:
-            user = User.query.get(sub)
-            session = Session.query.get(sid)
+            from app.db import db
+            res = db.session.query(User, Session).join(Session, Session.user_id == User.id).filter(User.id == sub, Session.id == sid).first()
+            user, session = res if res else (None, None)
             if not user or user.status != 'ACTIVE' or not session or session.revoked or as_utc(session.expires_at) < datetime.now(timezone.utc):
                 _PRINCIPAL_CACHE.pop(cache_key, None)
                 return jsonify(error='unauthorized', message='Session is no longer valid'), 401
+            cached_user = CachedUser(
+                id=user.id,
+                email=user.email,
+                status=user.status,
+                is_platform_admin=user.is_platform_admin,
+                mfa_enabled=user.mfa_enabled,
+                created_at=user.created_at,
+            )
+            cached_session = CachedSession(
+                id=session.id,
+                user_id=session.user_id,
+                revoked=session.revoked,
+                expires_at=session.expires_at,
+            )
             _PRINCIPAL_CACHE[cache_key] = {
                 'time': now,
-                'user': user,
-                'session': session,
+                'user': cached_user,
+                'session': cached_session,
                 'user_id': user.id,
                 'session_id': session.id,
             }
-            print(f">>> [AUTH] Cache MISS (DB fetched) in {time.time()-t_auth0:.4f}s")
+            user = cached_user
+            session = cached_session
 
         g.principal = {'user': user, 'claims': claims, 'session': session}
         return fn(*args, **kwargs)

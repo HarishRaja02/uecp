@@ -23,23 +23,12 @@ def create_app(test_config=None):
         engine_options['poolclass'] = NullPool
 
     if 'postgres' in db_url:
-        engine_options['connect_args'] = {'connect_timeout': 10}
+        engine_options['connect_args'] = {'connect_timeout': 5}
         if not os.getenv('VERCEL'):
             engine_options['pool_pre_ping'] = True
             engine_options['pool_recycle'] = 300
             engine_options['pool_size'] = 10
             engine_options['max_overflow'] = 20
-        if os.getenv('VERCEL'):
-            try:
-                from sqlalchemy import create_engine, text
-                test_engine = create_engine(db_url, poolclass=NullPool, connect_args={'connect_timeout': 10})
-                with test_engine.connect() as conn:
-                    conn.execute(text("SELECT 1"))
-                test_engine.dispose()
-            except Exception as err:
-                app.logger.warning(f"PostgreSQL connection failed ({err}). Falling back to SQLite at /tmp/uecp.db")
-                db_url = "sqlite:////tmp/uecp.db"
-                engine_options = {}
 
     app.config.update(
         SECRET_KEY=settings.flask_secret_key,

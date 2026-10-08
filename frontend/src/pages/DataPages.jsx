@@ -34,24 +34,31 @@ import {
   Mail,
   Edit3,
 } from 'lucide-react';
-import { api, API_BASE } from '../lib/api';
+import { api, API_BASE, getCached } from '../lib/api';
 import Table from '../components/Table';
 import { PageTitle } from './Overview';
 import { useToast } from '../components/Toast';
 
 function useData(path) {
-  const [data, setData] = useState([]);
+  const cached = getCached(path);
+  const [data, setData] = useState(() => cached?.items || []);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !cached);
 
-  const load = () => {
-    setLoading(true);
-    return api(path)
+  const load = (forceFresh = false) => {
+    if (!cached || forceFresh) {
+      setLoading(true);
+    }
+    return api(path, { fresh: forceFresh })
       .then((x) => {
         setData(x.items || []);
         setError('');
       })
-      .catch((err) => setError(err.message || 'Unable to load this section'))
+      .catch((err) => {
+        if (!data || data.length === 0) {
+          setError(err.message || 'Unable to load this section');
+        }
+      })
       .finally(() => setLoading(false));
   };
 
@@ -59,7 +66,7 @@ function useData(path) {
     load();
   }, [path]);
 
-  return { data, error, loading, reload: load };
+  return { data, error, loading, reload: () => load(true) };
 }
 
 function Modal({ title, onClose, children }) {

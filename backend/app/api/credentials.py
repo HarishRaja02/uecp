@@ -67,11 +67,18 @@ def list_access_grants():
         Subscription.organization_id
     ).filter(Subscription.status.in_(['ACTIVE', 'TRIAL'])).all())
 
+    # Pre-index credentials by grant to avoid N queries in graph traversal
+    all_creds = Credential.query.all()
+    creds_by_grant = {}
+    for c in all_creds:
+        creds_by_grant.setdefault(c.access_grant_id, []).append(c)
+
     context = {
         'orgs': {item.id: item for item in org_list},
         'apps': {item.id: item for item in app_list},
         'grants': {g.id: g for g in grants},
         'active_subs': active_subs,
+        'creds_by_grant': creds_by_grant,
     }
 
     return jsonify(items=[{
