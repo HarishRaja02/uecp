@@ -2,8 +2,10 @@
   "name": "uecp",
   "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
-    "postinstall": "npm --prefix frontend install",
-    "build": "npm --prefix frontend install && npm --prefix frontend run build"
+    "build": "npm run build --workspace=frontend"
   }
 }
